@@ -2,19 +2,19 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>{ROOM} | pychat</title>
+    <title>%(room)s | pychat</title>
   </head>
   <body>
-    <h1>{ROOM}</h1>
+    <h1>%(room)s</h1>
 
     <ul id="messages"></ul>
     <form id="message-form">
       <label for="message">
         Send a message:
-        <input id="message" name="message" type="text" />
+        <input id="message" name="message" type="text" required />
       </label>
       <input type="submit" />
-      <p><small>Sending as {NICK}</small></p>
+      <p><small>Sending as %(nick)s</small></p>
     </form>
 
     <article>
@@ -23,13 +23,10 @@
     </article>
 
     <script>
-      const room = "{ROOM}",
-        nick = "{NICK}";
-
       const messageList = document.getElementById("messages");
       const form = document.getElementById("message-form");
       const online = document.getElementById("online");
-      const ws = new WebSocket("ws://localhost:3000/ws");
+      const ws = new WebSocket(`ws://${location.hostname}:${location.port}/ws`);
       const readyPromise = new Promise((resolve) => {
         function onOpen(e) {
           resolve();
@@ -71,16 +68,6 @@
           }
         }
       });
-
-      readyPromise.then(() =>
-        ws.send(
-          JSON.stringify({
-            action: "init",
-            nick,
-            room,
-          })
-        )
-      );
     </script>
   </body>
 </html>

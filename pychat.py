@@ -3,6 +3,7 @@ import json
 import urllib.parse
 import weakref
 from collections import defaultdict
+from http.cookies import SimpleCookie
 
 rooms = defaultdict(list)
 nicks = weakref.WeakKeyDictionary()
@@ -27,6 +28,19 @@ async def broadcast_presence(room):
     )
 
 
+def get_cookie(scope):
+    for key, value in scope["headers"]:
+        if key == b"cookie":
+            cookie = SimpleCookie()
+            cookie.load(value.decode("utf-8"))
+            return cookie
+    return None
+
+
+def cookie_valid(cookie):
+    return "nick" in cookie and "room" in cookie
+
+
 async def application(scope, recv, send):
     if scope["type"] == "http":
         return await handle_http(scope, recv, send)
@@ -34,14 +48,20 @@ async def application(scope, recv, send):
     if scope["type"] != "websocket":
         return
 
+    cookie = get_cookie(scope)
     event = await recv()
     assert event["type"] == "websocket.connect"
-    if scope["path"] != "/ws":
+    if cookie is None or not cookie_valid(cookie) or scope["path"] != "/ws":
         await send({"type": "websocket.close"})
         return
     await send({"type": "websocket.accept"})
-    nick = room = None
-    inited = False
+
+    room = cookie["room"].value
+    nick = cookie["nick"].value
+    rooms[room].append(send)
+    nicks[send] = nick
+
+    await broadcast_presence(room)
 
     while True:
         event = await recv()
@@ -55,23 +75,6 @@ async def application(scope, recv, send):
 
         data = json.loads(text)
         action = data.get("action")
-        if action == "init":
-            nick, room = data.get("nick"), data.get("room")
-            if not isinstance(nick, str) or not isinstance(room, str):
-                await send(
-                    {
-                        "type": "websocket.close",
-                        "code": 1008,
-                    }
-                )
-                break
-            inited = True
-            rooms[room].append(send)
-            nicks[send] = nick
-
-            await broadcast_presence(room)
-        elif not inited:
-            continue
 
         if action == "send":
             msg = data.get("message")
@@ -102,14 +105,30 @@ async def handle_http(scope, recv, send):
     path = scope["path"]
     method = scope["method"]
 
-    async def respond(status=200, content_type=b"text/plain", body=b""):
+    async def respond(
+        status=200, content_type=b"text/plain", body=b"", cookie=None, location=None
+    ):
+        headers = [
+            (b"content-type", content_type),
+        ]
+
+        if cookie is not None:
+            cookie_headers = cookie.output().split("\r\n")
+            headers.extend(
+                (
+                    b"set-cookie",
+                    h[len("set-cookie: ") :].encode("utf-8"),
+                )
+                for h in cookie_headers
+            )
+        if location is not None:
+            headers.append((b"location", location))
+
         await send(
             {
                 "type": "http.response.start",
                 "status": status,
-                "headers": [
-                    (b"content-type", content_type),
-                ],
+                "headers": headers,
             }
         )
         await send(
@@ -124,6 +143,28 @@ async def handle_http(scope, recv, send):
             await respond(content_type=b"text/html", body=f.read())
         return
 
+    elif path == "/room" and method == "GET":
+        cookie = get_cookie(scope)
+        if not cookie or not cookie_valid(cookie):
+            await respond(content_type=b"text/plain", status=303, location=b"/")
+            return
+
+        with open("templates/room.html", "r") as f:
+            template = f.read()
+
+        await respond(
+            content_type=b"text/html",
+            body=(
+                template
+                % {
+                    "room": sanitize_string(cookie["room"].value),
+                    "nick": sanitize_string(cookie["nick"].value),
+                }
+            ).encode("utf-8"),
+            cookie=cookie,
+        )
+        return
+
     elif path == "/join" and method == "POST":
         data = dict(urllib.parse.parse_qsl(event["body"].decode("utf-8")))
         nick = data.get("nick")
@@ -133,15 +174,11 @@ async def handle_http(scope, recv, send):
             await respond(status=400, body=b"Bad request")
             return
 
-        with open("templates/room.html", "r") as f:
-            template = f.read()
+        cookie = SimpleCookie()
+        cookie["nick"] = nick
+        cookie["room"] = room
 
-        await respond(
-            content_type=b"text/html",
-            body=template.replace("{ROOM}", sanitize_string(room))
-            .replace("{NICK}", sanitize_string(nick))
-            .encode("utf-8"),
-        )
+        await respond(status=303, location=b"/room", cookie=cookie)
         return
 
     await respond(status=404, body=b"Not found")
