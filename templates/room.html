@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>{ROOM} | pychat</title>
+  </head>
+  <body>
+    <h1>{ROOM}</h1>
+
+    <ul id="messages"></ul>
+    <form id="message-form">
+      <textarea name="message"></textarea>
+      <input type="submit" />
+      <p><small>Sending as {NICK}</small></p>
+    </form>
+
+    <script>
+      const room = "{ROOM}",
+        nick = "{NICK}";
+
+      const messageList = document.getElementById("messages");
+      const form = document.getElementById("message-form");
+      const ws = new WebSocket("ws://localhost:3000/ws");
+      const readyPromise = new Promise((resolve) => {
+        function onOpen(e) {
+          resolve();
+          ws.removeEventListener("open", onOpen);
+        }
+
+        ws.addEventListener("open", onOpen);
+      });
+
+      readyPromise.then(() =>
+        ws.send(
+          JSON.stringify({
+            action: "init",
+            nick,
+            room,
+          })
+        )
+      );
+
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        await readyPromise;
+        ws.send(
+          JSON.stringify({
+            action: "send",
+            message: form.elements.message.value,
+          })
+        );
+        form.elements.message.value = "";
+      });
+
+      ws.addEventListener("message", ({ data }) => {
+        const payload = JSON.parse(data);
+        if (payload.action === "message") {
+          const el = document.createElement("li");
+          const text = document.createElement("blockquote");
+          text.innerText = payload.message;
+          const author = document.createElement("figcaption");
+          author.innerText = payload.sender;
+          el.append(text, author);
+          messageList.appendChild(el);
+        }
+      });
+    </script>
+  </body>
+</html>
