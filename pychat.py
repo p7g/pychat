@@ -102,23 +102,26 @@ async def handle_http(scope, recv, send):
     path = scope["path"]
     method = scope["method"]
 
-    if path == "/" and method == "GET":
+    async def respond(status=200, content_type=b"text/plain", body=b""):
         await send(
             {
                 "type": "http.response.start",
-                "status": 200,
+                "status": status,
                 "headers": [
-                    (b"content-type", b"text/html"),
+                    (b"content-type", content_type),
                 ],
             }
         )
+        await send(
+            {
+                "type": "http.response.body",
+                "body": body,
+            }
+        )
+
+    if path == "/" and method == "GET":
         with open("templates/home.html", "rb") as f:
-            await send(
-                {
-                    "type": "http.response.body",
-                    "body": f.read(),
-                }
-            )
+            await respond(content_type=b"text/html", body=f.read())
         return
 
     elif path == "/join" and method == "POST":
@@ -127,57 +130,18 @@ async def handle_http(scope, recv, send):
         room = data.get("room")
 
         if not isinstance(nick, str) or not isinstance(room, str):
-            await send(
-                {
-                    "type": "http.response.start",
-                    "status": 400,
-                    "headers": [
-                        (b"content-type", b"text/plain"),
-                    ],
-                }
-            )
-            await send(
-                {
-                    "type": "http.response.body",
-                    "body": b"Bad request",
-                }
-            )
+            await respond(status=400, body=b"Bad request")
             return
 
         with open("templates/room.html", "r") as f:
             template = f.read()
 
-        await send(
-            {
-                "type": "http.response.start",
-                "status": 200,
-                "headers": [
-                    (b"content-type", b"text/html"),
-                ],
-            }
-        )
-        await send(
-            {
-                "type": "http.response.body",
-                "body": template.replace("{ROOM}", sanitize_string(room))
-                .replace("{NICK}", sanitize_string(nick))
-                .encode("utf-8"),
-            }
+        await respond(
+            content_type=b"text/html",
+            body=template.replace("{ROOM}", sanitize_string(room))
+            .replace("{NICK}", sanitize_string(nick))
+            .encode("utf-8"),
         )
         return
 
-    await send(
-        {
-            "type": "http.response.start",
-            "status": 404,
-            "headers": [
-                (b"content-type", b"text/html"),
-            ],
-        }
-    )
-    await send(
-        {
-            "type": "http.response.body",
-            "body": b"Not Found",
-        }
-    )
+    await respond(status=404, body=b"Not found")
