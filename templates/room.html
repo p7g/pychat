@@ -9,10 +9,18 @@
 
     <ul id="messages"></ul>
     <form id="message-form">
-      <textarea name="message"></textarea>
+      <label for="message">
+        Send a message:
+        <input id="message" name="message" type="text" />
+      </label>
       <input type="submit" />
       <p><small>Sending as {NICK}</small></p>
     </form>
+
+    <article>
+      <h1>Currently online</h1>
+      <ul id="online"></ul>
+    </article>
 
     <script>
       const room = "{ROOM}",
@@ -20,6 +28,7 @@
 
       const messageList = document.getElementById("messages");
       const form = document.getElementById("message-form");
+      const online = document.getElementById("online");
       const ws = new WebSocket("ws://localhost:3000/ws");
       const readyPromise = new Promise((resolve) => {
         function onOpen(e) {
@@ -29,16 +38,6 @@
 
         ws.addEventListener("open", onOpen);
       });
-
-      readyPromise.then(() =>
-        ws.send(
-          JSON.stringify({
-            action: "init",
-            nick,
-            room,
-          })
-        )
-      );
 
       form.addEventListener("submit", async (e) => {
         e.preventDefault();
@@ -62,8 +61,26 @@
           author.innerText = payload.sender;
           el.append(text, author);
           messageList.appendChild(el);
+        } else if (payload.action === "presence") {
+          while (online.lastChild) online.removeChild(online.lastChild);
+
+          for (const nick of payload.presence) {
+            const el = document.createElement("li");
+            el.innerText = nick;
+            online.appendChild(el);
+          }
         }
       });
+
+      readyPromise.then(() =>
+        ws.send(
+          JSON.stringify({
+            action: "init",
+            nick,
+            room,
+          })
+        )
+      );
     </script>
   </body>
 </html>

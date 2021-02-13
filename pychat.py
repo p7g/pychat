@@ -1,9 +1,30 @@
 import asyncio
 import json
 import urllib.parse
+import weakref
 from collections import defaultdict
 
 rooms = defaultdict(list)
+nicks = weakref.WeakKeyDictionary()
+
+
+async def broadcast(room, msg):
+    await asyncio.gather(
+        *[
+            send({"type": "websocket.send", "text": json.dumps(msg)})
+            for send in rooms[room]
+        ]
+    )
+
+
+async def broadcast_presence(room):
+    await broadcast(
+        room,
+        {
+            "action": "presence",
+            "presence": [nicks[user] for user in rooms[room]],
+        },
+    )
 
 
 async def application(scope, recv, send):
@@ -46,6 +67,9 @@ async def application(scope, recv, send):
                 break
             inited = True
             rooms[room].append(send)
+            nicks[send] = nick
+
+            await broadcast_presence(room)
         elif not inited:
             continue
 
@@ -53,26 +77,18 @@ async def application(scope, recv, send):
             msg = data.get("message")
             if not isinstance(msg, str):
                 continue
-            await asyncio.gather(
-                *[
-                    client(
-                        {
-                            "type": "websocket.send",
-                            "text": json.dumps(
-                                {
-                                    "action": "message",
-                                    "sender": nick,
-                                    "message": msg,
-                                }
-                            ),
-                        }
-                    )
-                    for client in rooms[room]
-                ]
+            await broadcast(
+                room,
+                {
+                    "action": "message",
+                    "sender": nick,
+                    "message": msg,
+                },
             )
 
     if room is not None:
         rooms[room].remove(send)
+    await broadcast_presence(room)
 
 
 def sanitize_string(string):
